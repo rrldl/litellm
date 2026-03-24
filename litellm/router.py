@@ -42,6 +42,10 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 from typing_extensions import overload
 
+# 修改2026.3.24
+from .router_strategy.edge_resource_strategy import EdgeResourceStrategy
+# 修改2026.3.24
+
 import litellm
 import litellm.litellm_core_utils
 import litellm.litellm_core_utils.exception_mapping_utils
@@ -9163,6 +9167,7 @@ class Router:
                         healthy_deployments=healthy_deployments,  # type: ignore
                     )
                 )
+                
             else:
                 deployment = None
             if deployment is None:
