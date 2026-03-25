@@ -296,6 +296,7 @@ class Router:
             "latency-based-routing",
             "cost-based-routing",
             "usage-based-routing-v2",
+            "edge-resource-aware",  # <--- 加上这一行，这就是你的身份证号
         ] = "simple-shuffle",
         optional_pre_call_checks: Optional[OptionalPreCallChecks] = None,
         routing_strategy_args: dict = {},  # just for latency-based
@@ -790,7 +791,9 @@ class Router:
         # Validate routing_strategy value to fail fast with helpful error
         # See: https://github.com/BerriAI/litellm/issues/11330
         # Derive valid strategies from RoutingStrategy enum + "simple-shuffle" (default, not in enum)
-        valid_strategy_strings = ["simple-shuffle"] + [s.value for s in RoutingStrategy]
+
+        # 修改后：
+        valid_strategy_strings = ["simple-shuffle", "edge-resource-aware"] + [s.value for s in RoutingStrategy]
 
         if routing_strategy is not None:
             is_valid_string = (
@@ -806,58 +809,64 @@ class Router:
                     f"or the 'routing_strategy' parameter if using the Router SDK directly."
                 )
 
+
+        # --- [第2步] 找到那一大串 elif 的结尾，精准插入你的逻辑 ---
         if (
             routing_strategy == RoutingStrategy.LEAST_BUSY.value
             or routing_strategy == RoutingStrategy.LEAST_BUSY
         ):
             self.leastbusy_logger = LeastBusyLoggingHandler(router_cache=self.cache)
-            ## add callback
             if isinstance(litellm.input_callback, list):
-                litellm.input_callback.append(self.leastbusy_logger)  # type: ignore
+                litellm.input_callback.append(self.leastbusy_logger)
             else:
-                litellm.input_callback = [self.leastbusy_logger]  # type: ignore
+                litellm.input_callback = [self.leastbusy_logger]
             if isinstance(litellm.callbacks, list):
-                litellm.logging_callback_manager.add_litellm_callback(self.leastbusy_logger)  # type: ignore
+                litellm.logging_callback_manager.add_litellm_callback(self.leastbusy_logger)
+
         elif (
             routing_strategy == RoutingStrategy.USAGE_BASED_ROUTING.value
             or routing_strategy == RoutingStrategy.USAGE_BASED_ROUTING
         ):
-            self.lowesttpm_logger = LowestTPMLoggingHandler(
-                router_cache=self.cache,
-                routing_args=routing_strategy_args,
-            )
+            self.lowesttpm_logger = LowestTPMLoggingHandler(router_cache=self.cache, routing_args=routing_strategy_args)
             if isinstance(litellm.callbacks, list):
-                litellm.logging_callback_manager.add_litellm_callback(self.lowesttpm_logger)  # type: ignore
+                litellm.logging_callback_manager.add_litellm_callback(self.lowesttpm_logger)
+
         elif (
             routing_strategy == RoutingStrategy.USAGE_BASED_ROUTING_V2.value
             or routing_strategy == RoutingStrategy.USAGE_BASED_ROUTING_V2
         ):
-            self.lowesttpm_logger_v2 = LowestTPMLoggingHandler_v2(
-                router_cache=self.cache,
-                routing_args=routing_strategy_args,
-            )
+            self.lowesttpm_logger_v2 = LowestTPMLoggingHandler_v2(router_cache=self.cache, routing_args=routing_strategy_args)
             if isinstance(litellm.callbacks, list):
-                litellm.logging_callback_manager.add_litellm_callback(self.lowesttpm_logger_v2)  # type: ignore
+                litellm.logging_callback_manager.add_litellm_callback(self.lowesttpm_logger_v2)
+
         elif (
             routing_strategy == RoutingStrategy.LATENCY_BASED.value
             or routing_strategy == RoutingStrategy.LATENCY_BASED
         ):
-            self.lowestlatency_logger = LowestLatencyLoggingHandler(
-                router_cache=self.cache,
-                routing_args=routing_strategy_args,
-            )
+            self.lowestlatency_logger = LowestLatencyLoggingHandler(router_cache=self.cache, routing_args=routing_strategy_args)
             if isinstance(litellm.callbacks, list):
-                litellm.logging_callback_manager.add_litellm_callback(self.lowestlatency_logger)  # type: ignore
+                litellm.logging_callback_manager.add_litellm_callback(self.lowestlatency_logger)
+
         elif (
             routing_strategy == RoutingStrategy.COST_BASED.value
             or routing_strategy == RoutingStrategy.COST_BASED
         ):
-            self.lowestcost_logger = LowestCostLoggingHandler(
-                router_cache=self.cache,
-                routing_args={},
-            )
+            self.lowestcost_logger = LowestCostLoggingHandler(router_cache=self.cache, routing_args={})
             if isinstance(litellm.callbacks, list):
-                litellm.logging_callback_manager.add_litellm_callback(self.lowestcost_logger)  # type: ignore
+                litellm.logging_callback_manager.add_litellm_callback(self.lowestcost_logger)
+
+        # >>>>>>>>>> 这是你亲手加的核心分支 <<<<<<<<<<
+        elif routing_strategy == "edge-resource-aware":
+            from .router_strategy.edge_resource_strategy import EdgeResourceStrategy
+            # 实例化你的策略管理器
+            self.edge_resource_manager = EdgeResourceStrategy(router=self)
+            
+            # 漂亮的启动日志，让你在 9000 行代码中一眼看到成功
+            print("\n" + "★"*50)
+            print("🚀 [SYSTEM] Edge-Resource-Aware Strategy ACTIVATED!")
+            print("★"*50 + "\n")
+        # >>>>>>>>>> 核心分支结束 <<<<<<<<<<
+
         else:
             pass
 
@@ -9068,6 +9077,7 @@ class Router:
             and self.routing_strategy != "cost-based-routing"
             and self.routing_strategy != "latency-based-routing"
             and self.routing_strategy != "least-busy"
+            and self.routing_strategy != "edge-resource-aware" # <--- 加上这一行，别漏了 and
         ):  # prevent regressions for other routing strategies, that don't have async get available deployments implemented.
             return self.get_available_deployment(
                 model=model,
@@ -9166,6 +9176,21 @@ class Router:
                         model_group=model,
                         healthy_deployments=healthy_deployments,  # type: ignore
                     )
+                )
+            elif (
+                self.routing_strategy == "edge-resource-aware"
+            ):
+                # 别看这里只有几行，这代表了你对边缘计算的理解
+                from .router_strategy.edge_resource_strategy import EdgeResourceStrategy
+                
+                # 动态初始化（如果还没初始化的话）
+                if not hasattr(self, "edge_resource_manager"):
+                    self.edge_resource_manager = EdgeResourceStrategy(router=self)
+                    
+                deployment = self.edge_resource_manager.get_available_deployment(
+                    model_group=model,
+                    healthy_deployments=healthy_deployments, # type: ignore
+                    request_kwargs=request_kwargs
                 )
                 
             else:
@@ -9318,6 +9343,25 @@ class Router:
                         healthy_deployments=pass_through_deployments,  # type: ignore
                     )
                 )
+            # --- 下面是你新增的“端云协同”逻辑 ---
+            elif (
+                self.routing_strategy == "edge-resource-aware"
+            ):
+                # 1. 确保你的策略类已经加载（在文件开头 import 或者这里动态 import）
+                from .router_strategy.edge_resource_strategy import EdgeResourceStrategy
+                
+                # 2. 检查是否已经初始化过管理器，如果没有则初始化
+                if not hasattr(self, "edge_resource_manager") or self.edge_resource_manager is None:
+                    self.edge_resource_manager = EdgeResourceStrategy(router=self)
+                
+                # 3. 调用你的核心算法：传入当前所有健康的节点，让它挑一个
+                deployment = self.edge_resource_manager.get_available_deployment(
+                    model_group=model,
+                    healthy_deployments=pass_through_deployments, # type: ignore
+                    request_kwargs=request_kwargs # 这个参数包含用户的 Prompt 长度等信息
+                )
+            # --- 新增结束 ---
+            
             else:
                 deployment = None
 
@@ -9463,6 +9507,22 @@ class Router:
             deployment = self.leastbusy_logger.get_available_deployments(
                 model_group=model, healthy_deployments=healthy_deployments  # type: ignore
             )
+        # --- 下面是你新增的同步路由分支 ---
+        elif self.routing_strategy == "edge-resource-aware":
+            # 1. 动态加载你的策略类
+            from .router_strategy.edge_resource_strategy import EdgeResourceStrategy
+            
+            # 2. 确保管理器已初始化
+            if not hasattr(self, "edge_resource_manager") or self.edge_resource_manager is None:
+                self.edge_resource_manager = EdgeResourceStrategy(router=self)
+            
+            # 3. 执行同步路由：注意这里传入的是当前代码块里的 healthy_deployments
+            deployment = self.edge_resource_manager.get_available_deployment(
+                model_group=model,
+                healthy_deployments=healthy_deployments, # type: ignore
+                request_kwargs=locals().get('request_kwargs', locals().get('kwargs', {}))
+            )
+        # --- 新增结束 ---
         elif self.routing_strategy == "simple-shuffle":
             # if users pass rpm or tpm, we do a random weighted pick - based on rpm/tpm
             ############## Check 'weight' param set for weighted pick #################
@@ -9627,6 +9687,23 @@ class Router:
             deployment = self.leastbusy_logger.get_available_deployments(
                 model_group=model, healthy_deployments=pass_through_deployments  # type: ignore
             )
+        # --- 下面是你新增的：针对边缘资源的负载均衡决策 ---
+        elif self.routing_strategy == "edge-resource-aware":
+            # 动态加载策略类
+            from .router_strategy.edge_resource_strategy import EdgeResourceStrategy
+            
+            # 实例化或获取管理器
+            if not hasattr(self, "edge_resource_manager") or self.edge_resource_manager is None:
+                self.edge_resource_manager = EdgeResourceStrategy(router=self)
+            
+            # 执行决策：注意传入的是 pass_through_deployments
+            deployment = self.edge_resource_manager.get_available_deployment(
+                model_group=model,
+                healthy_deployments=pass_through_deployments, # type: ignore
+                request_kwargs=request_kwargs if 'request_kwargs' in locals() else {}
+            )
+        # --- 新增结束 ---
+
         elif self.routing_strategy == "simple-shuffle":
             return simple_shuffle(
                 llm_router_instance=self,
