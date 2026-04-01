@@ -46,6 +46,10 @@ from typing_extensions import overload
 from .router_strategy.edge_resource_strategy import EdgeResourceStrategy
 # 修改2026.3.24
 
+#修改于2026.3.25
+from .complexity_analyzer import analyzer
+#修改于2026.3.25
+
 import litellm
 import litellm.litellm_core_utils
 import litellm.litellm_core_utils.exception_mapping_utils
@@ -861,9 +865,9 @@ class Router:
             # 实例化你的策略管理器
             self.edge_resource_manager = EdgeResourceStrategy(router=self)
             
-            # 漂亮的启动日志，让你在 9000 行代码中一眼看到成功
+            # 漂亮的启动日志
             print("\n" + "★"*50)
-            print("🚀 [SYSTEM] Edge-Resource-Aware Strategy ACTIVATED!")
+            print(" [SYSTEM] Edge-Resource-Aware Strategy ACTIVATED!")
             print("★"*50 + "\n")
         # >>>>>>>>>> 核心分支结束 <<<<<<<<<<
 
@@ -9180,19 +9184,20 @@ class Router:
             elif (
                 self.routing_strategy == "edge-resource-aware"
             ):
-                # 别看这里只有几行，这代表了你对边缘计算的理解
+                # 对边缘计算的理解
                 from .router_strategy.edge_resource_strategy import EdgeResourceStrategy
                 
                 # 动态初始化（如果还没初始化的话）
                 if not hasattr(self, "edge_resource_manager"):
                     self.edge_resource_manager = EdgeResourceStrategy(router=self)
                     
+                # 使用关键字参数 (Keyword Arguments) 调用，这样最稳
                 deployment = self.edge_resource_manager.get_available_deployment(
-                    model_group=model,
-                    healthy_deployments=healthy_deployments, # type: ignore
-                    request_kwargs=request_kwargs
-                )
-                
+                model_group=model,
+                healthy_deployments=healthy_deployments, # type: ignore
+                request_kwargs=request_kwargs, # 注意这里的变量名
+                messages=messages  # <--- 显式传递 messages
+            )
             else:
                 deployment = None
             if deployment is None:
@@ -9347,7 +9352,7 @@ class Router:
             elif (
                 self.routing_strategy == "edge-resource-aware"
             ):
-                # 1. 确保你的策略类已经加载（在文件开头 import 或者这里动态 import）
+                # 1. 确保你的策略类已经加载
                 from .router_strategy.edge_resource_strategy import EdgeResourceStrategy
                 
                 # 2. 检查是否已经初始化过管理器，如果没有则初始化
@@ -9355,11 +9360,13 @@ class Router:
                     self.edge_resource_manager = EdgeResourceStrategy(router=self)
                 
                 # 3. 调用你的核心算法：传入当前所有健康的节点，让它挑一个
+                # 使用关键字参数 (Keyword Arguments) 调用，这样最稳
                 deployment = self.edge_resource_manager.get_available_deployment(
-                    model_group=model,
-                    healthy_deployments=pass_through_deployments, # type: ignore
-                    request_kwargs=request_kwargs # 这个参数包含用户的 Prompt 长度等信息
-                )
+                model_group=model,
+                healthy_deployments=healthy_deployments, # type: ignore
+                request_kwargs=request_kwargs, # 注意这里的变量名
+                messages=messages  # <--- 显式传递 messages
+            )
             # --- 新增结束 ---
             
             else:
@@ -9520,7 +9527,8 @@ class Router:
             deployment = self.edge_resource_manager.get_available_deployment(
                 model_group=model,
                 healthy_deployments=healthy_deployments, # type: ignore
-                request_kwargs=locals().get('request_kwargs', locals().get('kwargs', {}))
+                messages=messages,  # <--- 直接传这个关键变量！
+                request_kwargs=request_kwargs
             )
         # --- 新增结束 ---
         elif self.routing_strategy == "simple-shuffle":
@@ -9700,7 +9708,8 @@ class Router:
             deployment = self.edge_resource_manager.get_available_deployment(
                 model_group=model,
                 healthy_deployments=pass_through_deployments, # type: ignore
-                request_kwargs=request_kwargs if 'request_kwargs' in locals() else {}
+                messages=messages,  # <--- 直接传这个关键变量！
+                request_kwargs=request_kwargs
             )
         # --- 新增结束 ---
 
