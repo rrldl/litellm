@@ -8,120 +8,145 @@
 [![Python](https://img.shields.io/badge/Python-3.9%2B-green.svg)](https://www.python.org/)
 
 ## 1. 项目背景 (Motivation)
-在边缘计算场景下，本地部署的轻量级大模型（LLM）常面临两个瓶颈：
-1. **资源瓶颈**：硬件负载过高导致显存溢出 (OOM) 或推理极慢。
-2. **能力瓶颈**：小参数模型在处理代码生成、复杂数学证明等高难度任务时，回答质量远不如云端大模型。
+在边缘计算场景下，本地部署的轻量级大模型（LLM）面临双重挑战：
+1. **显存瓶颈**：4GB 等小显存设备在处理长文本时极易发生 **OOM (Out-of-Memory)**。
+2. **能力瓶颈**：小参数模型难以胜任高难度语义任务。
 
-**EcoRoute-LLM** 通过深入 LiteLLM 核心源码，实现了一个**双维度感知（硬件负载 + 任务复杂度）**的智能路由网关，确保任务在“本地稳定性”与“回答质量”之间取得最优平衡。
+**EcoRoute-LLM** 通过深入 LiteLLM 路由层源码，构建了一个**预判式（Proactive）**调度网关。它不仅能监控当前负载，还能根据输入文本提前预算显存需求，实现“未雨绸缪”的离载调度。
 
 ---
 
 ## 2. 系统架构 (System Architecture)
 
-本项目在 LiteLLM 路由层植入了自定义 `EdgeResourceStrategy` 决策算子：
-
 ```mermaid
 graph TD
     User([User Request]) --> Gateway{EcoRoute Gateway}
-    Gateway -- "Load < 60% AND Complexity < 0.5" --> Edge[Edge Node: Qwen-1.5B]
-    Gateway -- "Load >= 60% OR Complexity >= 0.5" --> Cloud[Cloud Node: Qwen-Plus API]
+    Gateway -- "Peak VRAM < Threshold AND Complexity < 0.5" --> Edge[Edge: Qwen-1.5B]
+    Gateway -- "Peak VRAM >= Threshold OR Complexity >= 0.5" --> Cloud[Cloud: Qwen-Plus]
     Edge --> Response
     Cloud --> Response
 ```
 
-- **感知层**：实时监控 CPU/RAM 负载，并对 Prompt 进行启发式语义特征分析。
-- **决策层**：基于双维度水印算法（Watermark）进行动态离载。
-- **执行层**：无缝对接 OpenAI 兼容协议，支持本地后端与阿里云 Dashscope。
+---
+
+## 3. 核心技术实现 (Implementation Details)
+
+本项目通过对 LiteLLM 源码的侵入式修改，实现了以下核心组件：
+
+| 修改/新增文件 | 模块类型 | 核心贡献 (Key Contribution) |
+| :--- | :--- | :--- |
+| **`litellm/resource_monitor.py`** | 感知层 | **Task 3 核心**。集成 NVML 驱动，实现基于 KV-Cache 增量预判的显存预算算法。 |
+| **`litellm/complexity_analyzer.py`** | 感知层 | **Task 2 核心**。构建关键词加权与意图特征提取引擎，评估 Prompt 语义难度。 |
+| **`litellm/router_strategy/edge_resource_strategy.py`** | 决策层 | 实现负载预判（Projected Load）与语义复杂度双维度的路由决策矩阵。 |
+| **`litellm/router.py` (源码修改)** | 接入层 | 注册自定义路由策略，打通 Context 消息传递链路，解决异步上下文丢失 Bug。 |
+| **`litellm/proxy/proxy_server.py` (修改)** | 系统层 | 修复 Windows 环境下 YAML 配置文件的 `gbk` 编码死锁问题，提升健壮性。 |
+
 
 ---
 
-## 3. 核心进展 (Current Progress)
+## 4. 阶段性开发任务详解 (Development Roadmap & Tasks)
 
-### ✅ Task 1: 硬件负载感知的自动化离载 (Watermark-based Offloading)
-*   **实时监控**：集成 `psutil` 实现了亚秒级系统资源采样。
-*   **动态切流**：设定 60% 负载阈值，成功实现高压状态下的任务平滑上云，保障了本地系统的稳定性。
+本项目遵循“感知 $\rightarrow$ 决策 $\rightarrow$ 优化”的学术路径，共分为三个已完成阶段及三个规划阶段：
 
-### ✅ Task 2: 任务复杂度感知路由 (Complexity-Aware Dispatching)
-*   **语义特征提取**：构建了基于关键词加权（Keyword Weighting）与文本长度惩罚的复杂度评估引擎。
-*   **意图分流**：
-    - **低复杂度**：基础闲聊（如 "Hi"）自动分配至本地，降低 Token 成本。
-    - **高复杂度**：代码任务（如 "C++ QuickSort"）、算法分析、长文本总结等自动路由至云端，保障输出精度。
-*   **链路打通**：重构了 `router.py` 的参数下发链路，解决了异步请求下的上下文丢失问题。
+### 🏁 已完成任务 (Completed Tasks)
 
----
+#### ✅ Task 1: 基础资源感知与水印离载 (Watermark-based Offloading)
+*   **目标**：建立初步的边缘保护机制。
+*   **实现**：集成 `psutil` 监控系统 CPU 与 RAM。通过设定 **60% 静态水印阈值**，当系统整体负载超标时，网关自动将请求重定向至云端，解决了边缘节点在高并发下的死机问题。
 
-## 4. 运行效果展示 (Screenshots)
+#### ✅ Task 2: 语义复杂度感知路由 (Semantic Complexity Awareness)
+*   **目标**：解决边缘小模型“能力不足”导致的回答质量差问题。
+*   **实现**：构建了一个**启发式语义分析引擎**。通过关键词权重匹配（如 `C++`, `Algorithm` 等高频逻辑词）结合文本长度特征，为每个 Prompt 计算复杂度评分（0-1.0）。实现“简单任务本地化，复杂任务云端化”。
 
-### 4.1 核心分流实验截图
-
-> 这里展示了 EcoRoute 网关在不同场景下的实时决策日志，验证了“负载+复杂度”双感知逻辑：
-
-#### 场景 1：简单任务留在本地
-![简单任务留在本地](../images/simple_edge.png)
-
-#### 场景 2：复杂任务触发上云
-![复杂代码任务自动上云](../images/complex_cloud.png)
-
-#### 场景 3：硬件负载过高触发上云
-![硬件负载过高上云](../images/hardware_cloud.png)
+#### ✅ Task 3: 显存预判式主动调度 (Proactive VRAM Budgeting) —— **[核心突破]**
+*   **目标**：彻底解决 LLM 推理中最核心的 **OOM (显存溢出)** 风险。
+*   **实现**：
+    *   **底层接入**：废弃通用的 RAM 指标，通过 `pynvml` 直接读取 NVIDIA GPU 寄存器的实时显存。
+    *   **预算模型**：引入 **KV-Cache 增量预估公式**。在推理开始前，根据输入的 Token 规模预计算即将产生的显存峰值。
+    *   **主动防御**：实现“环境负载 + 任务增量”的双重判定，即使在 4GB 显存的极端受限环境下，也能通过预判精准避险。
 
 ---
 
-## 5. 实验数据 (Experimental Results)
+### 🚀 后期规划任务 (Future Roadmap)
 
-| 测试场景 | 负载状态 | 任务复杂度评分 | 路由决策 | 实验结论 |
-| :--- | :--- | :--- | :--- | :--- |
-| 基础问候 (Hi) | 52.6% (低) | 0.05 (低) | **🏠 本地边缘侧** | ✅ 节省 Token，快速响应 |
-| 逻辑对话 | 52.6% (中) | 0.25 (中) | **🏠 本地边缘侧** | ✅ 本地能力范围，低成本 |
-| **代码生成 (C++)** | 52.7% (高) | **1.00 (极高)** | **🚀 云端离载** | ✅ 避开本地能力短板 |
-| **长文总结** | 52.3% (低) | **0.85 (高)** | **🚀 云端离载** | ✅ 语义感知触发分流 |
-| 极端负载压测 | **61.6% (高)** | 0.05 (低) | **🚀 云端离载** | ✅ 硬件保护触发离载 |
+#### 🛠️ Task 4: 多目标优化调度 (Multi-Objective Pareto Optimization)
+*   **简介**：不再单一依赖阈值判断，而是引入**帕累托最优**决策。综合权衡 **Token 成本 (Cost)**、**响应时延 (Latency)** 与 **模型精度 (Accuracy)**，根据用户优先级偏好（如“省钱模式”或“极致性能”）动态调整路由策略。
+
+#### 🌐 Task 5: 边缘 P2P 协同计算 (Edge-to-Edge Cluster Coordination)
+*   **简介**：打破单设备瓶颈，构建**边缘算力池**。当本地节点 A 显存不足时，网关通过服务发现机制搜索局域网内的空闲节点 B。实现跨设备的负载均衡，最大化边缘侧的整体吞吐量。
+
+#### ⚡ Task 6: 动态量化感知路由 (Adaptive Quantization Routing)
+*   **简介**：实现更精细的“降级执行”。当负载处于临界区（如 70%-85%）时，网关不再简单上云，而是联动后端自动切换至更低比特（如 **INT4/NF4**）的量化模型。通过牺牲极小精度来换取系统的**连续可用性 (Service Continuity)**。
+
 ---
 
-## 6. 快速开始 (Quick Start)
 
-### 6.1 环境配置
+## 5. 运行效果展示 (Experimental Screenshots)
+
+### 场景 1：基础任务本地执行 (Task 1 & 2 成果)
+> 当负载低且复杂度低时，系统选择本地边缘侧以降低 Token 成本。
+![场景1：简单对话留在本地](../images/simple_edge.png) 
+
+
+### 场景 2：高难度任务语义离载 (Task 2 成果)
+> 识别出代码生成等复杂逻辑，自动切换至云端大模型。
+![场景2：复杂任务触发上云](../images/complex_cloud.png)
+
+### 场景 3：长文本显存预算预判 (Task 3 核心成果)
+> **亮点**：即使机器空闲，但因输入极长，算法预判到生成的 KV-Cache 将导致 OOM，提前拦截并上云。
+![场景3：长文本预判上云](../images/long_text_proactive.png) 
+
+### 场景 4：硬件负载饱和保护 (Task 3 核心成果)
+> **亮点**：模拟后台任务挤占显存。即便任务极简，系统为保护硬件稳定性，强制执行云端离载。
+![场景4：高压测自我保护](../images/hardware_stress_cloud.png)
+
+---
+
+## 6. 实验数据 (Experimental Results)
+
+| 测试场景 | 硬件基础负载 | 任务预期增量 | 语义复杂度 | 路由决策 | 核心价值 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 基础问候 | 44.5% | 0.1% | 0.05 | **🏠 本地** | 节省 Token，快速响应 |
+| **代码生成** | 44.5% | 0.5% | **0.55** | **🚀 云端** | 语义感知，质量保障 |
+| **超长文本** | 47.0% | **53.0%** | 0.25 | **🚀 云端** | **预判避险，防止 OOM** |
+| 极限压测 | **94.9%** | 3.4% | 0.05 | **🚀 云端** | **硬件红线保护** |
+
+---
+
+## 7. 快速开始 (Quick Start)
+
+### 7.1 环境配置
 ```bash
 git clone https://github.com/rrldl/litellm.git
 pip install -e .
-pip install llama-cpp-python psutil nvidia-ml-py
+pip install psutil nvidia-ml-py torch
 ```
 
-### 6.2 启动服务
-1. **启动本地后端**:
-   ```bash
-   # 监听 8001 端口
-   python local_server.py 
-   ```
-2. **启动 EcoRoute 智能网关**:
-   ```bash
-   python -m litellm.proxy.proxy_cli --config configs/test_config.yaml
-   ```
+### 7.2 启动 EcoRoute 智能网关
+```bash
+# 启动网关端口 4000
+python -m litellm.proxy.proxy_cli --config configs/test_config.yaml
+```
 
-### 6.3 验证决策 (PowerShell 示例)
+### 7.3 验证 Task 3 预判能力 (PowerShell)
 ```powershell
-# 测试高复杂度分流
-Invoke-RestMethod -Uri "http://127.0.0.1:4000/chat/completions" -Method Post -ContentType "application/json" -Body '{"model": "my-qwen", "messages": [{"role": "user", "content": "Show me a C++ snippet for quicksort."}]}'
+# 构造超长文本模拟显存溢出风险
+$long_content = "测试文本" * 2000
+$body = @{ model="my-qwen"; messages=@(@{role="user"; content=$long_content}) } | ConvertTo-Json
+$bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+Invoke-RestMethod -Uri "http://127.0.0.1:4000/chat/completions" -Method Post -ContentType "application/json; charset=utf-8" -Body $bytes
 ```
 
 ---
 
-## 7. 后续规划 (Roadmap)
-
-### 🚀 Task 3: 显存级精准调度 (VRAM-Centric Monitoring)
-*   **目标**：利用 `pynvml` 库直接获取 NVIDIA GPU 的实时显存占用，替代内存（RAM）指标，精准预防本地显存溢出。
-
-### 🛠️ Task 4: 多目标优化调度 (Cost-Latency Optimization)
-*   **目标**：建立帕累托最优模型，综合权衡 Token 成本、响应时延与任务紧迫度。
-
-### 🌐 Task 5: 多节点边缘协同 (Multi-Edge Coordination)
-*   **目标**：在局域网内实现跨设备的算力共享（Local P2P Dispatching）。
+## 8. 后续规划 (Roadmap)
+*   **Task 4**: 实现多目标优化调度（综合权衡成本、时延与模型精度）。
+*   **Task 5**: 实现边缘 P2P 协同推理（跨设备显存池化）。
+*   **Task 6**: 动态量化感知路由（负载临界区自动切换 INT4 量化模型）。
 
 ---
 
-## 8. 致谢 (Acknowledgments)
-感谢 **LiteLLM** 社区提供的可扩展架构，使得自定义路由策略的非侵入式开发成为可能。
+## 9. 致谢 (Acknowledgments)
+感谢 **LiteLLM** 社区提供的模块化架构，使得自定义路由策略的实现成为可能。
 
 ---
-
-

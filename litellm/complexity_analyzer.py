@@ -38,6 +38,9 @@ class ComplexityAnalyzer:
             
             content = str(content or "").lower()
             
+            # 清洗乱码：只保留可打印字符
+            content = "".join([c for c in content if c.isprintable() or c in [" ", "\n", "\t"]])
+            
             # 调试日志
             print(f" [Analyzer Debug] 提取内容: '{content[:50]}...'")
 
