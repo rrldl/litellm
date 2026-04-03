@@ -1,0 +1,17 @@
+model_list:
+  - model_name: my-qwen
+    litellm_params:
+      model: "openai/qwen-plus"
+      api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      api_key: "sk-c3a0c220902746499c97a91746048736"
+    tags: ["cloud"]
+
+  - model_name: my-qwen
+    litellm_params:
+      model: "openai/qwen"
+      api_base: "http://127.0.0.1:8001"
+      api_key: "not-needed"
+    tags: ["edge"]
+
+router_settings:
+  routing_strategy: "edge-resource-aware"
