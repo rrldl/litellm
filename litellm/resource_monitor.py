@@ -11,6 +11,14 @@ try:
 except ImportError:
     logging.debug("EcoRoute: pynvml 未安装，GPU 监控失效。")
 
+# =====================================================================
+# 🚨 演示开关 (Demo Override) 🚨
+# 为 True 时，系统切断与底层物理网卡的显存通讯，强制锁定在 72% 的橙色高压区
+# 专门用于展示 Task 6 的 "Graceful Degradation (优雅降级)"
+# 改为 False 即可恢复真实的 GPU 监控！
+# =====================================================================
+DEMO_MODE_TASK6 = False 
+
 class ResourceMonitor:
     """
     边缘节点资源感知器 (Proactive VRAM Budgeting Version)
@@ -43,6 +51,9 @@ class ResourceMonitor:
 
     def get_realtime_vram_usage(self) -> float:
         """获取当前硬件真实的实时显存占用率"""
+        if DEMO_MODE_TASK6:
+            return 0.72  # 强制伪造 72% 的基础高负载
+
         if not self.has_gpu: return psutil.virtual_memory().percent / 100.0
         try:
             info = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
@@ -55,6 +66,19 @@ class ResourceMonitor:
         原理：在 Decode 阶段，KV-Cache 会随 Token 序列线性增长。
         通过计算 (Prompt_len + Expected_len) * Unit_KV_Size 预估峰值，提前规避 OOM。
         """
+        # 计算预估增量显存
+        estimated_prompt_tokens = len(prompt_text) / 2
+        total_expected_tokens = estimated_prompt_tokens + max_new_tokens
+        projected_kv_cache_mb = total_expected_tokens * self.bytes_per_token_mb
+
+        if DEMO_MODE_TASK6:
+            # 演示模式下：假设显卡是 8GB(8192MB)，基础负载锁死 72%
+            total_mb = 8192.0
+            current_used_mb = total_mb * 0.72 
+            # 加上 10% 的系统冗余缓冲区 (System Safety Buffer)
+            peak_estimated_mb = current_used_mb + (projected_kv_cache_mb * 1.1)
+            return min(peak_estimated_mb / total_mb, 1.0)
+
         if not self.has_gpu:
             return 0.0
             
@@ -62,13 +86,6 @@ class ResourceMonitor:
             info = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
             current_used_mb = info.used / (1024**2)
             total_mb = info.total / (1024**2)
-            
-            # 粗略计算 Token 数量 (按字符 1:1.5 估算，实际可用 tokenizer 进一步精确)
-            estimated_prompt_tokens = len(prompt_text) / 2
-            total_expected_tokens = estimated_prompt_tokens + max_new_tokens
-            
-            # 计算预估增量显存
-            projected_kv_cache_mb = total_expected_tokens * self.bytes_per_token_mb
             
             # 加上 10% 的系统冗余缓冲区 (System Safety Buffer)
             peak_estimated_mb = current_used_mb + projected_kv_cache_mb * 1.1
@@ -84,7 +101,7 @@ class ResourceMonitor:
         如果提供了 request_content，则执行【预判式显存评估】；
         否则执行【实时显存监控】。
         """
-        if self.has_gpu:
+        if self.has_gpu or DEMO_MODE_TASK6:
             if request_content:
                 # 清洗乱码：只保留可打印字符
                 request_content = "".join([c for c in request_content if c.isprintable() or c in [" ", "\n", "\t"]])
@@ -103,7 +120,7 @@ class ResourceMonitor:
 
     def __del__(self):
         """释放 NVML 句柄"""
-        if self.has_gpu:
+        if self.has_gpu and NVML_AVAILABLE:
             try:
                 pynvml.nvmlShutdown()
             except:
