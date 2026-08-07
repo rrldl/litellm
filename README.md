@@ -22,7 +22,7 @@
 
 系统由传统的单层网关跃升为具备服务发现与硬件级感知能力的分布式集群网关。
 
-![EcoRoute Gateway Architecture](../images/EcoRoute%20Gateway%20Request.png)
+![EcoRoute Gateway Architecture](images/EcoRoute%20Gateway%20Request.png)
 
 ***
 
@@ -86,34 +86,34 @@
 
 > **场景还原**：简单任务留本地，复杂代码任务自动上云。
 >
-> ![alt text](../images/simple_edge.png)
+> ![alt text](images/simple_edge.png)
 >
 >
-> ![alt text](../images/complex_cloud.png)
+> ![alt text](images/complex_cloud.png)
 
 ### 🖼️ 场景 3：硬件预判与高压避险 (Task 3)
 
 > **场景还原**：准确预判长文本生成的显存增量，在系统崩溃前拦截上云。
 >
-> ![alt text](../images/long_text_proactive.png)
+> ![alt text](images/long_text_proactive.png)
 
 ### 📈 场景 4：同 Prompt 异构 SLA 多目标优化 (Task 4)
 
 > **场景还原**：当用户传入 `preference: {"cost": 0.8}`（省钱模式）时，系统忍受极高负载留在本地计算；当追求极致性能时，系统秒切云端大模型，展现千人千面的 SLA 调度。
 >
-> ![场景：多目标优化](../images/task4_multi_objective.png)
+> ![场景：多目标优化](images/task4_multi_objective.png)
 
 ### 🌐 场景 5：分布式边缘集群 P2P 协同 (Task 5)
 
 > **场景还原**：本地 Node A 高压且遇到长文本，预判将直接击穿 85% 红线。网关拒绝高昂的云端开销，通过异步软状态表发现低负载的局域网室友节点 Node B，执行跨设备 P2P 调度！
 >
-> ![场景：分布式边缘P2P协同](../images/task5_p2p_routing.png)
+> ![场景：分布式边缘P2P协同](images/task5_p2p_routing.png)
 
 ### 🌟 场景 6：动态量化与优雅降级 (Task 6 核心成果)
 
 > **场景还原**：网关检测到本地基础负载高达 72%。若继续分配给 FP16 节点，预算将逼近崩溃边缘。此时网关拒绝硬抗，决策引擎触发 **帕累托漂移**，施加 60% 拥塞惩罚，将请求果断路由至本机的 INT4 量化副本 (Port: 8003)。
 >
-> ![场景：动态量化感知路由](../images/task6_graceful_degradation.png)
+> ![场景：动态量化感知路由](images/task6_graceful_degradation.png)
 > *(注：此图完美展现了主网关多目标寻优决策、底层量化节点接管与客户端透明降级的全过程)*
 
 ***
