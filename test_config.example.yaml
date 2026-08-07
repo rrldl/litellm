@@ -3,7 +3,7 @@ model_list:
     litellm_params:
       model: "openai/qwen-plus"
       api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-      api_key: "sk-c3a0c220902746499c97a91746048736"
+      api_key: "os.environ/DASHSCOPE_API_KEY"
     tags: ["cloud"]
 
   - model_name: my-qwen
